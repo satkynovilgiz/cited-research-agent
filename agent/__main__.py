@@ -28,7 +28,7 @@ def main() -> int:
     logging.basicConfig(level=logging.WARNING if args.quiet else logging.INFO,
                         format="  [log] %(message)s", stream=sys.stderr)
     # Keep other libraries' chatter out of the log.
-    for noisy in ("httpx", "httpcore", "primp", "ddgs", "google_genai"):
+    for noisy in ("httpx", "httpx2", "httpcore", "primp", "ddgs", "google_genai"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
     result = run_agent(args.question, max_steps=args.max_steps)

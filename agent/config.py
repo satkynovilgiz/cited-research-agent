@@ -1,6 +1,7 @@
 """Settings for the agent, read from environment variables / the .env file."""
 
 import os
+import warnings
 
 from dotenv import load_dotenv
 
@@ -8,7 +9,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Which Gemini model to use. Change it in .env with GEMINI_MODEL=...
-MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
 
 # The hard limit: the agent may make at most this many tool calls.
 DEFAULT_MAX_STEPS = 8
@@ -32,6 +33,12 @@ RETRY_DELAY = 1.0
 RETRIES = {"web_search": 2}
 DEFAULT_RETRIES = 1
 
+# The LLM: give up on one call after this many seconds, and retry it at most
+# this many times. Without this, a busy model ("503 high demand") is retried
+# quietly for minutes.
+LLM_TIMEOUT = 60
+LLM_RETRIES = 2
+
 
 def make_llm(model_name: str | None = None):
     """Create the Gemini chat model. Fails with a clear message if no key is set."""
@@ -42,4 +49,12 @@ def make_llm(model_name: str | None = None):
     # Imported here so tests (which use a fake LLM) never need this package set up.
     from langchain_google_genai import ChatGoogleGenerativeAI
 
-    return ChatGoogleGenerativeAI(model=model_name or MODEL_NAME, temperature=0)
+    # Some Gemini models ignore temperature and print a warning about it - hide it.
+    warnings.filterwarnings("ignore", message=".*fixed sampling defaults.*")
+
+    return ChatGoogleGenerativeAI(
+        model=model_name or MODEL_NAME,
+        temperature=0,        # same question -> (nearly) same answer; good for evaluation
+        timeout=LLM_TIMEOUT,  # never wait forever for a busy model
+        max_retries=LLM_RETRIES,
+    )
