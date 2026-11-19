@@ -33,6 +33,8 @@ log = logging.getLogger("agent")
 
 # Tools whose successful result is a downloaded page we can cite.
 PAGE_TOOLS = {"fetch_page", "summarise_page"}
+# Tools that return a list of search results.
+SEARCH_TOOLS = {"web_search", "wikipedia_search"}
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +60,9 @@ class AgentState(TypedDict):
 AGENT_PROMPT = """You are a careful research agent. Answer the user's question using web sources.
 
 Tools:
-- web_search(query): find pages. Snippets are NOT sources and cannot be cited.
+- web_search(query): search the whole web. Snippets are NOT sources and cannot be cited.
+- wikipedia_search(query): search Wikipedia only. Use for background facts, or if
+  web_search fails. Snippets cannot be cited either.
 - fetch_page(url): download a page's text. It becomes a numbered source.
 - summarise_page(url, focus): like fetch_page but returns a focused summary (good for long pages).
 
@@ -203,7 +207,7 @@ def build_graph(llm, tools: dict, retry_delay: float = config.RETRY_DELAY):
                            "Try a different URL or a different search query.")
             elif "already" in result:
                 content = f"Already fetched as source [{known['id']}]."
-            elif name == "web_search":
+            elif name in SEARCH_TOOLS:
                 content = format_search_results(result)
             else:  # a page was fetched: save it as a new numbered source
                 if result.get("usage"):

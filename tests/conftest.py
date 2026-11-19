@@ -59,18 +59,25 @@ def page(url: str, title: str = "A page") -> dict:
     return {"url": url, "title": title, "text": f"Some useful facts from {url}."}
 
 
-def fake_tools(search=None, fetch=None, summarise=None) -> dict:
-    """Build the three tools from plain Python functions."""
+def fake_tools(search=None, fetch=None, summarise=None, wiki=None) -> dict:
+    """Build the four tools from plain Python functions."""
 
     def default_search(query):
         return {"results": [{"title": "Result", "url": "https://search-only.example/x",
                              "snippet": "a snippet"}]}
+
+    def default_wiki(query):
+        return {"results": [{"title": "Wiki", "url": "https://en.wikipedia.org/wiki/X",
+                             "snippet": "a wiki snippet"}]}
 
     def default_summarise(url, focus):
         return page(url)
 
     def _search(query: str) -> dict:
         return (search or default_search)(query)
+
+    def _wiki(query: str) -> dict:
+        return (wiki or default_wiki)(query)
 
     def _fetch(url: str) -> dict:
         return (fetch or page)(url)
@@ -80,6 +87,7 @@ def fake_tools(search=None, fetch=None, summarise=None) -> dict:
 
     return {t.name: t for t in [
         StructuredTool.from_function(_search, name="web_search", description="search"),
+        StructuredTool.from_function(_wiki, name="wikipedia_search", description="wiki"),
         StructuredTool.from_function(_fetch, name="fetch_page", description="fetch"),
         StructuredTool.from_function(_summarise, name="summarise_page", description="sum"),
     ]}

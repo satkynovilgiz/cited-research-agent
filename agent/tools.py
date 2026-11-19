@@ -44,6 +44,39 @@ def web_search(query: str, max_results: int = 5) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Tool 1b: wikipedia_search (a second, independent search engine)
+# ---------------------------------------------------------------------------
+WIKI_API = "https://en.wikipedia.org/w/api.php"
+# Wikipedia asks API users to send a descriptive User-Agent.
+WIKI_HEADERS = {"User-Agent": "cited-research-agent/0.1 (student learning project)"}
+
+
+def wikipedia_search(query: str, max_results: int = 5) -> dict:
+    """Search English Wikipedia (free MediaWiki API, no key) for {title, url, snippet}."""
+    params = {"action": "query", "list": "search", "srsearch": query,
+              "srlimit": max_results, "format": "json"}
+    try:
+        response = httpx.get(WIKI_API, params=params, headers=WIKI_HEADERS,
+                             timeout=config.SEARCH_TIMEOUT)
+        response.raise_for_status()
+        hits = response.json().get("query", {}).get("search", [])
+    except httpx.TimeoutException as exc:
+        raise ToolError("wikipedia search timed out") from exc
+    except Exception as exc:  # network error, HTTP error, bad JSON
+        raise ToolError(f"wikipedia search failed: {exc.__class__.__name__}") from exc
+
+    if not hits:
+        raise ToolError("wikipedia search returned no results")
+    return {"results": [
+        {"title": h["title"],
+         "url": "https://en.wikipedia.org/wiki/" + h["title"].replace(" ", "_"),
+         # Snippets contain <span> highlight tags - strip them.
+         "snippet": BeautifulSoup(h.get("snippet", ""), "html.parser").get_text()}
+        for h in hits
+    ]}
+
+
+# ---------------------------------------------------------------------------
 # Tool 2: fetch_page
 # ---------------------------------------------------------------------------
 # Some sites block requests that don't look like a browser.
@@ -151,10 +184,13 @@ def message_text(message) -> str:
 # The docstrings/descriptions below are what the LLM reads to choose a tool.
 # ---------------------------------------------------------------------------
 def make_tools(llm) -> dict[str, StructuredTool]:
-    """Return the three tools, keyed by name."""
+    """Return the four tools, keyed by name."""
 
     def _web_search(query: str) -> dict:
         return web_search(query)
+
+    def _wikipedia_search(query: str) -> dict:
+        return wikipedia_search(query)
 
     def _fetch_page(url: str) -> dict:
         return fetch_page(url)
@@ -167,6 +203,12 @@ def make_tools(llm) -> dict[str, StructuredTool]:
             _web_search, name="web_search",
             description="Search the web. Returns titles, URLs and short snippets. "
                         "Snippets cannot be cited - fetch a page to use it as a source.",
+        ),
+        StructuredTool.from_function(
+            _wikipedia_search, name="wikipedia_search",
+            description="Search English Wikipedia. Returns article titles, URLs and "
+                        "snippets. Good for background facts and definitions, and a "
+                        "backup when web_search fails. Fetch a page to cite it.",
         ),
         StructuredTool.from_function(
             _fetch_page, name="fetch_page",

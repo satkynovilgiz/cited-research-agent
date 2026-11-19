@@ -257,3 +257,31 @@ def test_web_search_gets_two_retries_with_backoff(monkeypatch):
     assert len(attempts) == 3                 # first try + 2 retries
     assert waits == [1, 2]                    # backoff: wait doubles
     assert result["tool_calls"][0]["success"] is True
+
+
+# ---------------------------------------------------------------------------
+# The real wikipedia_search tool, with the network mocked
+# ---------------------------------------------------------------------------
+def wiki_response(hits):
+    return httpx.Response(200, json={"query": {"search": hits}},
+                          request=httpx.Request("GET", "https://en.wikipedia.org"))
+
+
+def test_wikipedia_search_parses_results(monkeypatch):
+    from agent.tools import wikipedia_search
+
+    hits = [{"title": "Intermittent fasting",
+             "snippet": '<span class="searchmatch">Intermittent</span> fasting is...'}]
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: wiki_response(hits))
+    out = wikipedia_search("intermittent fasting")["results"]
+    assert out == [{"title": "Intermittent fasting",
+                    "url": "https://en.wikipedia.org/wiki/Intermittent_fasting",
+                    "snippet": "Intermittent fasting is..."}]
+
+
+def test_wikipedia_search_no_results(monkeypatch):
+    from agent.tools import wikipedia_search
+
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: wiki_response([]))
+    with pytest.raises(ToolError, match="no results"):
+        wikipedia_search("zzzzqqq")
