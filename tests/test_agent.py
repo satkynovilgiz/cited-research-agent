@@ -286,3 +286,62 @@ def test_wikipedia_search_no_results(monkeypatch):
     monkeypatch.setattr(httpx, "get", lambda *a, **k: wiki_response([]))
     with pytest.raises(ToolError, match="no results"):
         wikipedia_search("zzzzqqq")
+
+
+# ---------------------------------------------------------------------------
+# Search fallback: web_search -> wikipedia_search
+# ---------------------------------------------------------------------------
+def test_web_search_fails_so_agent_uses_wikipedia():
+    wiki_queries = []
+
+    def wiki(query):
+        wiki_queries.append(query)
+        return {"results": [{"title": "Intermittent fasting",
+                             "url": "https://en.wikipedia.org/wiki/Intermittent_fasting",
+                             "snippet": "..."}]}
+
+    llm = FakeLLM(script=[
+        decide(call("web_search", query="intermittent fasting")),
+        decide(call("fetch_page", url="https://en.wikipedia.org/wiki/Intermittent_fasting")),
+    ])
+    result = run_agent(Q, llm=llm, tools=fake_tools(
+        search=always_fail("search failed: No results found."), wiki=wiki))
+
+    step = result["tool_calls"][0]
+    assert step["success"] is True
+    assert step["attempts"] == 3                       # 1 try + 2 retries
+    assert step["search_tool_used"] == "wikipedia_search"
+    assert "fell back to wikipedia_search" in step["fallback_reason"]
+    assert wiki_queries == ["intermittent fasting"]    # same query was reused
+    assert result["steps"] == 2                        # fallback did not cost a step
+    assert result["sources"][0]["url"].startswith("https://en.wikipedia.org/")
+    assert "[1]" in result["answer"]
+
+
+def test_successful_web_search_is_logged_without_fallback():
+    llm = FakeLLM(script=[decide(call("web_search", query="fasting"))])
+    result = run_agent(Q, llm=llm, tools=fake_tools(wiki=always_fail("should not run")))
+    step = result["tool_calls"][0]
+    assert step["search_tool_used"] == "web_search"
+    assert step["fallback_reason"] is None
+
+
+def test_both_searches_fail_gives_honest_answer_without_citations():
+    llm = FakeLLM(
+        script=[decide(call("web_search", query="fasting")),
+                decide(call("web_search", query="fasting health"))],
+        answer="Fasting is great [1][2].",  # would be a made-up citation
+    )
+    result = run_agent(Q, llm=llm, tools=fake_tools(
+        search=always_fail("search failed: No results found."),
+        wiki=always_fail("wikipedia search timed out")))
+
+    assert result["sources"] == []
+    assert "couldn't find" in result["answer"]
+    assert "[" not in result["answer"]                 # no citations at all
+    for step in result["tool_calls"]:
+        assert step["success"] is False
+        assert step["search_tool_used"] is None
+        assert "which also failed (wikipedia search timed out)" in step["fallback_reason"]
+    tools_in_errors = {e["tool"] for e in result["errors"]}
+    assert tools_in_errors == {"web_search", "wikipedia_search"}
