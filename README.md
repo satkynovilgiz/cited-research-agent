@@ -71,7 +71,7 @@ python -m agent "question" --json          # print the full result as JSON
 python -m agent "question" --quiet         # hide the step-by-step log
 ```
 
-The model is set with `GEMINI_MODEL` in `.env` (default `gemini-2.5-flash`).
+The model is set with `GEMINI_MODEL` in `.env` (default `gemini-3.8-flash`; `gemini-2.5-flash` is no longer offered to new API keys).
 
 ### Use it from Python (for the evaluation harness)
 

@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Which Gemini model to use. Change it in .env with GEMINI_MODEL=...
-MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 # The hard limit: the agent may make at most this many tool calls.
 DEFAULT_MAX_STEPS = 8
