@@ -143,12 +143,13 @@ def test_tool_that_keeps_failing_is_reported_and_agent_moves_on():
 def test_empty_search_and_no_sources_gives_honest_answer():
     llm = FakeLLM(script=[decide(call("web_search", query="zzzz"))], answer="Made up [1].")
     result = run_agent(Q, llm=llm,
-                       tools=fake_tools(search=always_fail("search returned no results")))
+                       tools=fake_tools(search=always_fail("search returned no results"),
+                                        wiki=always_fail("wikipedia: no results")))
 
     assert result["sources"] == []
     assert "couldn't find" in result["answer"]
     assert "[1]" not in result["answer"]
-    assert result["tool_calls"][0]["error"] == "search returned no results"
+    assert "search returned no results" in result["tool_calls"][0]["error"]
 
 
 def test_unexpected_exception_in_tool_does_not_crash():

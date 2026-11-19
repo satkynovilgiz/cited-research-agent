@@ -35,6 +35,8 @@ log = logging.getLogger("agent")
 PAGE_TOOLS = {"fetch_page", "summarise_page"}
 # Tools that return a list of search results.
 SEARCH_TOOLS = {"web_search", "wikipedia_search"}
+# If web_search fails completely, this tool is tried automatically instead.
+FALLBACK_SEARCH = "wikipedia_search"
 
 
 # ---------------------------------------------------------------------------
@@ -200,15 +202,39 @@ def build_graph(llm, tools: dict, retry_delay: float = config.RETRY_DELAY):
                 retries = config.RETRIES.get(name, config.DEFAULT_RETRIES)
                 result, attempts, errs = call_with_retry(tools[name], args, retry_delay,
                                                          retries)
+            all_errors = [(name, e) for e in errs]
+
+            # Automatic search fallback: web_search gave nothing -> try Wikipedia.
+            search_tool_used = name if name in SEARCH_TOOLS and result else None
+            fallback_reason = None
+            if name == "web_search" and result is None and FALLBACK_SEARCH in tools:
+                fallback_reason = (f"web_search failed after {attempts - 1} retries "
+                                   f"({errs[-1]}) -> fell back to {FALLBACK_SEARCH}")
+                log.warning(json.dumps({"step": step_count, "event": "fallback",
+                                        "reason": fallback_reason}))
+                result, _, fb_errs = call_with_retry(
+                    tools[FALLBACK_SEARCH], args, retry_delay,
+                    config.RETRIES.get(FALLBACK_SEARCH, config.DEFAULT_RETRIES))
+                all_errors += [(FALLBACK_SEARCH, e) for e in fb_errs]
+                if result is not None:
+                    search_tool_used = FALLBACK_SEARCH
+                else:
+                    fallback_reason += f", which also failed ({fb_errs[-1]})"
 
             # Turn the result into a message the LLM can read.
-            if result is None:
+            if result is None and fallback_reason:
+                content = (f"ERROR: both searches failed: {fallback_reason}. "
+                           "Try a different, simpler search query.")
+            elif result is None:
                 content = (f"ERROR: {name} failed after {attempts} attempt(s): {errs[-1]}. "
                            "Try a different URL or a different search query.")
             elif "already" in result:
                 content = f"Already fetched as source [{known['id']}]."
             elif name in SEARCH_TOOLS:
                 content = format_search_results(result)
+                if fallback_reason:
+                    content = (f"(web_search failed, so these results come from "
+                               f"{FALLBACK_SEARCH}.)\n" + content)
             else:  # a page was fetched: save it as a new numbered source
                 if result.get("usage"):
                     usage = add_usage(usage, result["usage"])
@@ -223,14 +249,16 @@ def build_graph(llm, tools: dict, retry_delay: float = config.RETRY_DELAY):
             entry = {
                 "step": step_count, "tool": name, "input": args,
                 "success": result is not None, "attempts": attempts,
-                "error": errs[-1] if result is None else None,
+                "error": (fallback_reason or errs[-1]) if result is None else None,
+                "search_tool_used": search_tool_used,
+                "fallback_reason": fallback_reason,
                 "source_id": sources[-1]["id"] if result and name in PAGE_TOOLS
                              and "already" not in result else None,
                 "duration_s": round(time.time() - started, 2),
             }
             tool_log.append(entry)
-            errors += [{"step": step_count, "tool": name, "input": args, "error": e}
-                       for e in errs]
+            errors += [{"step": step_count, "tool": tool_name, "input": args, "error": e}
+                       for tool_name, e in all_errors]
             log.info(json.dumps(entry))
             replies.append(ToolMessage(content, tool_call_id=call["id"]))
 
