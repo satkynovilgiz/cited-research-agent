@@ -1,0 +1,11 @@
+# Secrets - never commit your API key
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Run logs written by the CLI (JSON files for evaluation)
+runs/
