@@ -78,6 +78,11 @@ Budget: you have used {used} of {max_steps} tool calls ({left} left).
 Sources fetched so far:
 {sources}"""
 
+# Sent (once) if the LLM tries to finish before fetching any page.
+NUDGE = ("You have not fetched any page yet, so nothing can be cited. Call fetch_page on "
+         "one or more of the most relevant URLs from the search results above (pick a "
+         "different site if one was blocked). If you have no URLs, search again.")
+
 ANSWER_PROMPT = """Write the final answer to the question using ONLY the numbered sources below.
 
 Rules:
@@ -158,17 +163,32 @@ def build_graph(llm, tools: dict, retry_delay: float = config.RETRY_DELAY):
             used=used, max_steps=max_steps, left=max_steps - used,
             sources=format_sources(state["sources"], with_text=False),
         )
+        messages = [SystemMessage(system), *state["messages"]]
+        new_messages, usage = [], state["usage"]
         try:
-            reply = llm_with_tools.invoke([SystemMessage(system), *state["messages"]])
+            reply = llm_with_tools.invoke(messages)
+            usage = add_usage(usage, getattr(reply, "usage_metadata", None))
+            new_messages.append(reply)
+
+            # The LLM wants to stop, but it has fetched nothing, so nothing could be
+            # cited. If steps are left, remind it ONCE to fetch a page.
+            already_nudged = any(getattr(m, "content", None) == NUDGE
+                                 for m in state["messages"])
+            if (not reply.tool_calls and not state["sources"]
+                    and used < max_steps and not already_nudged):
+                log.info(json.dumps({"event": "nudge", "reason": "tried to stop with no sources"}))
+                new_messages.append(HumanMessage(NUDGE))
+                reply = llm_with_tools.invoke(messages + new_messages)
+                usage = add_usage(usage, getattr(reply, "usage_metadata", None))
+                new_messages.append(reply)
         except Exception as exc:
             # The LLM itself failed (rate limit, network...). Don't crash:
             # go straight to answering with whatever we already have.
             error = {"where": "agent_llm", "error": f"{exc.__class__.__name__}: {exc}"}
             log.warning(json.dumps(error))
-            return {"messages": [AIMessage("(LLM error - stopping research)")],
-                    "errors": state["errors"] + [error]}
-        return {"messages": [reply],
-                "usage": add_usage(state["usage"], getattr(reply, "usage_metadata", None))}
+            return {"messages": new_messages + [AIMessage("(LLM error - stopping research)")],
+                    "errors": state["errors"] + [error], "usage": usage}
+        return {"messages": new_messages, "usage": usage}
 
     # ---- Node: tools (run the chosen tools, with retry + logging) --------
     def tools_node(state: AgentState) -> dict:

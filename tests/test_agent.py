@@ -345,3 +345,28 @@ def test_both_searches_fail_gives_honest_answer_without_citations():
         assert "which also failed (wikipedia search timed out)" in step["fallback_reason"]
     tools_in_errors = {e["tool"] for e in result["errors"]}
     assert tools_in_errors == {"web_search", "wikipedia_search"}
+
+
+# ---------------------------------------------------------------------------
+# Nudge: don't let the agent give up before fetching anything
+# ---------------------------------------------------------------------------
+def test_agent_is_reminded_once_to_fetch_before_stopping():
+    from langchain_core.messages import AIMessage
+
+    llm = FakeLLM(script=[
+        decide(call("web_search", query="fasting")),
+        AIMessage("DONE"),                                   # gives up too early
+        decide(call("fetch_page", url="https://a.org")),     # after the reminder
+    ])
+    result = run_agent(Q, llm=llm, tools=fake_tools())
+    assert [s["url"] for s in result["sources"]] == ["https://a.org"]
+    assert "[1]" in result["answer"]
+
+
+def test_reminder_is_only_sent_once():
+    from langchain_core.messages import AIMessage
+
+    llm = FakeLLM(forever=lambda: AIMessage("DONE"))  # refuses to ever fetch
+    result = run_agent(Q, llm=llm, tools=fake_tools())
+    assert llm.agent_calls == 2                        # first try + one reminder
+    assert result["sources"] == [] and "couldn't find" in result["answer"]
