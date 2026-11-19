@@ -20,8 +20,17 @@ HTTP_TIMEOUT = 15
 # need enough text to answer the question (this also saves tokens).
 MAX_PAGE_CHARS = 6000
 
-# How long to wait before retrying a failed tool (seconds).
+# How long to wait for a search engine (seconds).
+SEARCH_TIMEOUT = 10
+
+# How long to wait before the first retry (seconds). Each further retry waits
+# twice as long as the one before (1s, 2s, ...) - this is called "backoff".
 RETRY_DELAY = 1.0
+
+# How many times to retry each tool after a failure. Search gets an extra
+# retry because DuckDuckGo sometimes blocks a request for a few seconds.
+RETRIES = {"web_search": 2}
+DEFAULT_RETRIES = 1
 
 
 def make_llm(model_name: str | None = None):

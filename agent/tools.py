@@ -25,7 +25,11 @@ def web_search(query: str, max_results: int = 5) -> dict:
     from ddgs import DDGS  # imported here so tests never touch the network
 
     try:
-        raw = DDGS(timeout=config.HTTP_TIMEOUT).text(query, max_results=max_results)
+        # backend="auto": if DuckDuckGo blocks us (e.g. an HTTP 202 bot challenge),
+        # ddgs quietly tries other engines. timeout stops a hung request.
+        raw = DDGS(timeout=config.SEARCH_TIMEOUT).text(
+            query, max_results=max_results, backend="auto"
+        )
     except Exception as exc:  # ddgs raises its own errors, e.g. "No results found"
         raise ToolError(f"search failed: {exc}") from exc
 

@@ -99,23 +99,26 @@ def add_usage(total: dict, usage: dict | None) -> dict:
     return total
 
 
-def call_with_retry(tool, args: dict, delay: float) -> tuple[dict | None, int, list[str]]:
-    """Run a tool; if it fails, wait and try ONE more time.
+def call_with_retry(tool, args: dict, delay: float,
+                    retries: int = config.DEFAULT_RETRIES) -> tuple[dict | None, int, list[str]]:
+    """Run a tool; if it fails, wait and try again, up to `retries` more times.
 
+    The wait doubles each time (backoff): delay, 2*delay, 4*delay...
     Returns (result or None, number of attempts, list of error messages).
     Any exception is caught here, so a broken tool can never crash the agent.
     """
     errors = []
-    for attempt in (1, 2):
+    attempts = retries + 1
+    for attempt in range(1, attempts + 1):
         try:
             return tool.invoke(args), attempt, errors
         except ToolError as exc:
             errors.append(str(exc))
         except Exception as exc:  # bad arguments, unexpected bugs, etc.
             errors.append(f"{exc.__class__.__name__}: {exc}")
-        if attempt == 1:
-            time.sleep(delay)
-    return None, 2, errors
+        if attempt < attempts:
+            time.sleep(delay * 2 ** (attempt - 1))
+    return None, attempts, errors
 
 
 def format_search_results(result: dict) -> str:
@@ -190,7 +193,9 @@ def build_graph(llm, tools: dict, retry_delay: float = config.RETRY_DELAY):
             elif name in PAGE_TOOLS and known:
                 result, attempts, errs = {"already": known}, 1, []
             else:
-                result, attempts, errs = call_with_retry(tools[name], args, retry_delay)
+                retries = config.RETRIES.get(name, config.DEFAULT_RETRIES)
+                result, attempts, errs = call_with_retry(tools[name], args, retry_delay,
+                                                         retries)
 
             # Turn the result into a message the LLM can read.
             if result is None:

@@ -239,3 +239,21 @@ def test_api_ask(monkeypatch):
     assert resp.status_code == 200
     assert resp.json() == {"answer": "A [1].", "sources": fake["sources"],
                            "steps": fake["tool_calls"]}
+
+
+def test_web_search_gets_two_retries_with_backoff(monkeypatch):
+    waits, attempts = [], []
+    monkeypatch.setattr("agent.graph.time.sleep", waits.append)
+
+    def flaky_search(query):
+        attempts.append(query)
+        if len(attempts) < 3:
+            raise ToolError("search failed: No results found.")
+        return {"results": [{"title": "t", "url": "https://a.org", "snippet": "s"}]}
+
+    llm = FakeLLM(script=[decide(call("web_search", query="fasting"))])
+    result = run_agent(Q, llm=llm, tools=fake_tools(search=flaky_search), retry_delay=1)
+
+    assert len(attempts) == 3                 # first try + 2 retries
+    assert waits == [1, 2]                    # backoff: wait doubles
+    assert result["tool_calls"][0]["success"] is True
