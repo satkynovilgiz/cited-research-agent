@@ -33,6 +33,10 @@ RETRY_DELAY = 1.0
 RETRIES = {"web_search": 2}
 DEFAULT_RETRIES = 1
 
+# The agent should read at least this many pages before answering. If it tries
+# to stop with fewer (and has steps left), it is reminded once.
+MIN_SOURCES = 2
+
 # The LLM: give up on one call after this many seconds, and retry it at most
 # this many times. Without this, a busy model ("503 high demand") is retried
 # quietly for minutes.

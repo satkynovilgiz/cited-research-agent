@@ -78,10 +78,11 @@ Budget: you have used {used} of {max_steps} tool calls ({left} left).
 Sources fetched so far:
 {sources}"""
 
-# Sent (once) if the LLM tries to finish before fetching any page.
-NUDGE = ("You have not fetched any page yet, so nothing can be cited. Call fetch_page on "
-         "one or more of the most relevant URLs from the search results above (pick a "
-         "different site if one was blocked). If you have no URLs, search again.")
+# Sent (once) if the LLM tries to finish before fetching enough pages.
+NUDGE = (f"You have fetched fewer than {config.MIN_SOURCES} pages, which is not enough to "
+         "write a well-supported, cited answer. Call fetch_page on more of the most "
+         "relevant URLs from the search results above, preferably from different, reliable "
+         "sites (pick another site if one was blocked). If you have no URLs left, search again.")
 
 ANSWER_PROMPT = """Write the final answer to the question using ONLY the numbered sources below.
 
@@ -170,13 +171,13 @@ def build_graph(llm, tools: dict, retry_delay: float = config.RETRY_DELAY):
             usage = add_usage(usage, getattr(reply, "usage_metadata", None))
             new_messages.append(reply)
 
-            # The LLM wants to stop, but it has fetched nothing, so nothing could be
-            # cited. If steps are left, remind it ONCE to fetch a page.
+            # The LLM wants to stop, but it has fetched too few pages for a
+            # well-supported answer. If steps are left, remind it ONCE to fetch more.
             already_nudged = any(getattr(m, "content", None) == NUDGE
                                  for m in state["messages"])
-            if (not reply.tool_calls and not state["sources"]
+            if (not reply.tool_calls and len(state["sources"]) < config.MIN_SOURCES
                     and used < max_steps and not already_nudged):
-                log.info(json.dumps({"event": "nudge", "reason": "tried to stop with no sources"}))
+                log.info(json.dumps({"event": "nudge", "reason": f"tried to stop with {len(state['sources'])} source(s)"}))
                 new_messages.append(HumanMessage(NUDGE))
                 reply = llm_with_tools.invoke(messages + new_messages)
                 usage = add_usage(usage, getattr(reply, "usage_metadata", None))

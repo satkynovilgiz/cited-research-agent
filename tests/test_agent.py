@@ -370,3 +370,15 @@ def test_reminder_is_only_sent_once():
     result = run_agent(Q, llm=llm, tools=fake_tools())
     assert llm.agent_calls == 2                        # first try + one reminder
     assert result["sources"] == [] and "couldn't find" in result["answer"]
+
+
+def test_agent_is_reminded_when_it_has_only_one_source():
+    from langchain_core.messages import AIMessage
+
+    llm = FakeLLM(script=[
+        decide(call("fetch_page", url="https://a.org")),
+        AIMessage("DONE"),                                   # only 1 source so far
+        decide(call("fetch_page", url="https://b.org")),     # after the reminder
+    ])
+    result = run_agent(Q, llm=llm, tools=fake_tools())
+    assert len(result["sources"]) == 2
